@@ -4,29 +4,48 @@ PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
 
 <%!
 from static import css
+from static import jquery
 %>
 
 <html>
     <head>
         <title>${info['text']}</title>
         ${css('typo.css')|n}
+        ${css('style.css')|n}
+        ${jquery()|n}
     </head>
     <body>
-        <p>问题：${info['text']}</p>
-        <div>
-            %if re:
-                <p>回答：</p>
-            %endif
+        <div class="box">
+            <div class="box">
+                <p><a href="/" class="q">Q </a>${info['text']}</p>
+                <div>
+                    <span class="a" style="float:left">A </span>
+                    <div style="padding-top:17px;margin-left:40px;min-height:40px;">${info['answer']['text']|n}</div>
+                </div>
+            </div>
             %for i in re:
-                <p>${i['t'].encode('utf-8')}</p>
-                <p>回答者:${i['who'].encode('utf-8')}</p>
+                <div class="item">
+                    <% rid = i['id'] %>
+                    <a class="chs" href="#" onclick="choose('${rid}');">最佳</a>
+                    <div>${i['t'].encode('utf-8').replace(r'\n','<br />')|n}</div>
+                    <p class="name">回答者:${i['who'].encode('utf-8')}</p>
+                </div>
             %endfor
+            <form method="POST">
+                <input id="answer" type="hidden" name="answer"/>
+                <div class="send">
+                    <p>我是:<input name="who"/></p>
+                    <p>回答:<textarea name="text"></textarea></p>
+                    <input id="sub" type="submit">
+                </div>
+            </form>
         </div>
-        <form method="POST">
-            <p>我是:<input name="who"/></p>
-            <p>回答:<input name="text"/></p>
-            <input type="submit">
-        </form>
+        <script>
+            function choose(id) {
+                $('#answer').val(id);
+                $('#sub').click();
+            }
+    </script>
     </body>
 </html>
 

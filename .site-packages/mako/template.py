@@ -9,7 +9,7 @@ template strings, as well as template runtime operations."""
 
 from mako.lexer import Lexer
 from mako import runtime, util, exceptions, codegen, cache
-import imp, os, re, shutil, stat, sys, tempfile, time, types, weakref
+import os, re, shutil, stat, sys, tempfile, types, weakref
 
  
 class Template(object):
@@ -71,6 +71,13 @@ class Template(object):
 
     :param disable_unicode: Disables all awareness of Python Unicode
      objects.  See :ref:`unicode_disabled`.
+
+    :param enable_loop: When ``True``, enable the ``loop`` context variable.
+     This can be set to ``False`` to support templates that may
+     be making usage of the name "loop".   Individual templates can
+     re-enable the "loop" context by placing the directive 
+     ``enable_loop="True"`` inside the ``<%page>`` tag - see
+     :ref:`migrating_loop`.
 
     :param encoding_errors: Error parameter passed to ``encode()`` when
      string encoding is performed. See :ref:`usage_unicode`.
@@ -193,6 +200,7 @@ class Template(object):
                     buffer_filters=(), 
                     strict_undefined=False,
                     imports=None, 
+                    enable_loop=True,
                     preprocessor=None):
         if uri:
             self.module_id = re.sub(r'\W', "_", uri)
@@ -221,6 +229,7 @@ class Template(object):
         self.encoding_errors = encoding_errors
         self.disable_unicode = disable_unicode
         self.bytestring_passthrough = bytestring_passthrough or disable_unicode
+        self.enable_loop = enable_loop
         self.strict_undefined = strict_undefined
         self.module_writer = module_writer
 
@@ -283,6 +292,13 @@ class Template(object):
             cache_type, cache_dir, cache_url
         )
 
+    @util.memoized_property
+    def reserved_names(self):
+        if self.enable_loop:
+            return codegen.RESERVED_NAMES
+        else:
+            return codegen.RESERVED_NAMES.difference(['loop'])
+
     def _setup_cache_args(self, 
                 cache_impl, cache_enabled, cache_args,
                 cache_type, cache_dir, cache_url):
@@ -307,30 +323,33 @@ class Template(object):
             filemtime = os.stat(filename)[stat.ST_MTIME]
             if not os.path.exists(path) or \
                         os.stat(path)[stat.ST_MTIME] < filemtime:
+                data = util.read_file(filename)
                 _compile_module_file(
                             self, 
-                            open(filename, 'rb').read(), 
+                            data,
                             filename, 
                             path,
                             self.module_writer)
-            module = imp.load_source(self.module_id, path, open(path, 'rb'))
+            module = util.load_module(self.module_id, path)
             del sys.modules[self.module_id]
             if module._magic_number != codegen.MAGIC_NUMBER:
+                data = util.read_file(filename)
                 _compile_module_file(
                             self, 
-                            open(filename, 'rb').read(), 
+                            data, 
                             filename, 
                             path,
                             self.module_writer)
-                module = imp.load_source(self.module_id, path, open(path, 'rb'))
+                module = util.load_module(self.module_id, path)
                 del sys.modules[self.module_id]
             ModuleInfo(module, path, self, filename, None, None)
         else:
             # template filename and no module directory, compile code
             # in memory
+            data = util.read_file(filename)
             code, module = _compile_text(
                                 self, 
-                                open(filename, 'rb').read(), 
+                                data, 
                                 filename)
             self._source = None
             self._code = code
@@ -393,7 +412,7 @@ class Template(object):
  
         """
         if getattr(context, '_with_template', None) is None:
-            context._with_template = self
+            context._set_with_template(self)
         runtime._render_context(self, 
                                 self.callable_, 
                                 context, 
@@ -459,6 +478,7 @@ class ModuleTemplate(Template):
         self.encoding_errors = encoding_errors
         self.disable_unicode = disable_unicode
         self.bytestring_passthrough = bytestring_passthrough or disable_unicode
+        self.enable_loop = module._enable_loop
 
         if util.py3k and disable_unicode:
             raise exceptions.UnsupportedError(
@@ -499,6 +519,7 @@ class DefTemplate(Template):
         self.encoding_errors = parent.encoding_errors
         self.format_exceptions = parent.format_exceptions
         self.error_handler = parent.error_handler
+        self.enable_loop = parent.enable_loop
         self.lookup = parent.lookup
         self.bytestring_passthrough = parent.bytestring_passthrough
 
@@ -534,7 +555,7 @@ class ModuleInfo(object):
         if self.module_source is not None:
             return self.module_source
         else:
-            return open(self.module_filename).read()
+            return util.read_file(self.module_filename)
  
     @property
     def source(self):
@@ -546,21 +567,19 @@ class ModuleInfo(object):
             else:
                 return self.template_source
         else:
+            data = util.read_file(self.template_filename)
             if self.module._source_encoding:
-                return open(self.template_filename, 'rb').read().\
-                                decode(self.module._source_encoding)
+                return data.decode(self.module._source_encoding)
             else:
-                return open(self.template_filename).read()
- 
-def _compile_text(template, text, filename):
-    identifier = template.module_id
+                return data
+
+def _compile(template, text, filename, generate_magic_comment):
     lexer = Lexer(text, 
                     filename, 
                     disable_unicode=template.disable_unicode,
                     input_encoding=template.input_encoding,
                     preprocessor=template.preprocessor)
     node = lexer.parse()
- 
     source = codegen.compile(node, 
                             template.uri, 
                             filename,
@@ -568,9 +587,17 @@ def _compile_text(template, text, filename):
                             buffer_filters=template.buffer_filters, 
                             imports=template.imports, 
                             source_encoding=lexer.encoding,
-                            generate_magic_comment=template.disable_unicode,
+                            generate_magic_comment=generate_magic_comment,
                             disable_unicode=template.disable_unicode,
-                            strict_undefined=template.strict_undefined)
+                            strict_undefined=template.strict_undefined,
+                            enable_loop=template.enable_loop,
+                            reserved_names=template.reserved_names)
+    return source, lexer
+
+def _compile_text(template, text, filename):
+    identifier = template.module_id
+    source, lexer = _compile(template, text, filename, 
+                        generate_magic_comment=template.disable_unicode)
 
     cid = identifier
     if not util.py3k and isinstance(cid, unicode):
@@ -582,23 +609,8 @@ def _compile_text(template, text, filename):
 
 def _compile_module_file(template, text, filename, outputpath, module_writer):
     identifier = template.module_id
-    lexer = Lexer(text, 
-                    filename, 
-                    disable_unicode=template.disable_unicode,
-                    input_encoding=template.input_encoding,
-                    preprocessor=template.preprocessor)
- 
-    node = lexer.parse()
-    source = codegen.compile(node, 
-                                template.uri, 
-                                filename,
-                                default_filters=template.default_filters,
-                                buffer_filters=template.buffer_filters,
-                                imports=template.imports,
-                                source_encoding=lexer.encoding,
-                                generate_magic_comment=True,
-                                disable_unicode=template.disable_unicode,
-                                strict_undefined=template.strict_undefined)
+    source, lexer = _compile(template, text, filename, 
+                        generate_magic_comment=True)
  
     if isinstance(source, unicode):
         source = source.encode(lexer.encoding or 'ascii')

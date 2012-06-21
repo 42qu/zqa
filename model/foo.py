@@ -12,7 +12,8 @@ def post_reply(msg_id,who,text):
         msg_id,who,text)
 
 def chooseanswer(msg_id,reply_id):
-    pass
+    return _db.execute('update `msg` set answer_id = %s where id=%s' 
+            % (reply_id,msg_id))
 
 def getmsgs(limit=10):
     return _db.query('select * from `msg` limit %s' % limit);
@@ -20,8 +21,11 @@ def getmsgs(limit=10):
 def getmsg(id):
     return _db.get('select * from `msg` where id=%s' % id);
 
-def getreply(msg_id):
+def getreplys(msg_id):
     return _db.query('select * from `reply` where msg_id=%s' % msg_id);
+
+def getreply(re_id):
+    return _db.get('select * from `reply` where id=%s' % re_id);
 
 def search(text):
     pass

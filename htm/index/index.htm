@@ -8,27 +8,34 @@ from static import css
 
 <html>
     <head>
-        <title>Hello</title>
-        ${css('index/index.css')|n}
+        <title>QA</title>
         ${css('typo.css')|n}
+        ${css('style.css')|n}
     </head>
     <body>
+        <div class="box">
         %if msg_lst:
             %for m in msg_lst:
-            <div>
-                <p>Q: <a href="/m/${m['id']}">${m['text']}</a></p>
-                <p>A: ${m['answer']} </p>
-                <p>由 ${m['who']} 提问</p>
+            <div class="item">
+                <p><span class="q">Q </span><a href="/m/${m['id']}">${m['text']}</a></p>
+                <div>
+                    <span class="a" style="float:left">A </span>
+                    <div style="padding-top:17px;margin-left:40px;min-height:40px;">${m['answer']['text']|n}</div>
+                </div>
+                <p class="name">由 ${m['who']} 提问</p>
             </div>
             %endfor
         %else:
             <p>尚未有信息。</p>
         %endif
+        <div class="send">
         <form method="POST">
             <p>我是:<input name="who"/></p>
             <p>要问:<input name="text"/></p>
             <input type="submit">
         </form>
+        </div>
+        </div>
     </body>
 </html>
 
